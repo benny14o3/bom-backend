@@ -55,4 +55,4 @@ def save_bom(payload: dict, password: str = ""):
 
 @app.get("/health")
 def health():
-    return {"status": "ok", "boms": len(bom_store.get("boms", []))}
+    return {"status": "ok", "boms": len(bom_store.get("boms", []))} 
