@@ -15,7 +15,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-ADMIN_PASSWORD = os.environ.get("BOM_ADMIN_PASSWORD", "Lg06031936.!")
+ADMIN_PASSWORD = os.environ.get("BOM_ADMIN_PASSWORD", "06031936")
 GITHUB_TOKEN   = os.environ.get("GITHUB_TOKEN", "")
 GITHUB_REPO    = "benny14o3/fritsch-corteco"
 GITHUB_FILE    = "Produktions_BOM_App/data.json"
