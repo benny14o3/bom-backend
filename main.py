@@ -20,19 +20,30 @@ GITHUB_TOKEN   = os.environ.get("GITHUB_TOKEN", "")
 GITHUB_REPO    = "benny14o3/fritsch-corteco"
 GITHUB_FILE    = "Produktions_BOM_App/data.json"
 GITHUB_BRANCH  = "main"
+RAW_URL        = f"https://raw.githubusercontent.com/{GITHUB_REPO}/{GITHUB_BRANCH}/{GITHUB_FILE}"
 
 
 def github_get():
-    url = f"https://api.github.com/repos/{GITHUB_REPO}/contents/{GITHUB_FILE}?ref={GITHUB_BRANCH}"
-    req = urllib.request.Request(url, headers={
+    # Datei direkt per raw URL laden (umgeht 1MB Limit)
+    req = urllib.request.Request(RAW_URL, headers={
+        "Authorization": f"token {GITHUB_TOKEN}",
+        "User-Agent": "fritsch-bom-backend",
+        "Cache-Control": "no-cache"
+    })
+    with urllib.request.urlopen(req) as resp:
+        content = json.loads(resp.read().decode("utf-8"))
+
+    # SHA separat holen (wird fuer Commits benoetigt)
+    sha_url = f"https://api.github.com/repos/{GITHUB_REPO}/contents/{GITHUB_FILE}?ref={GITHUB_BRANCH}"
+    sha_req = urllib.request.Request(sha_url, headers={
         "Authorization": f"token {GITHUB_TOKEN}",
         "User-Agent": "fritsch-bom-backend"
     })
-    with urllib.request.urlopen(req) as resp:
+    with urllib.request.urlopen(sha_req) as resp:
         info = json.loads(resp.read())
-        content = json.loads(base64.b64decode(info["content"].replace("\n", "")).decode("utf-8"))
         sha = info["sha"]
-        return content, sha
+
+    return content, sha
 
 
 @app.get("/bom")
@@ -58,7 +69,7 @@ async def save_bom(payload: dict, password: str = ""):
             "Content-Type": "application/json",
             "User-Agent": "fritsch-bom-backend"
         }
-        async with httpx.AsyncClient() as client:
+        async with httpx.AsyncClient(timeout=30) as client:
             await client.put(
                 f"https://api.github.com/repos/{GITHUB_REPO}/contents/{GITHUB_FILE}",
                 headers=headers,
