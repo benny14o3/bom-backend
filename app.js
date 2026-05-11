@@ -1,7 +1,7 @@
 // ============================================================
 //  KONFIGURATION
 // ============================================================
-const ADMIN_PASSWORD = "fritsch2024"; // ← hier Passwort ändern
+const ADMIN_PASSWORD = "Lg06031936.!"; // ← hier Passwort ändern
 const STORAGE_KEY    = "bom_data_v1";
 
 const BOM_BACKEND = "https://bom-backend-d246.onrender.com";
