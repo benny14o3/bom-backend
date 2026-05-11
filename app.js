@@ -483,3 +483,235 @@ function printSingleBOM(bomId) {
 //  START
 // ============================================================
 loadData();
+
+// ============================================================
+//  EXCEL UPLOAD & PRODUKTIONSAUFTRÄGE
+// ============================================================
+
+function handleExcelUpload(event) {
+  const file = event.target.files[0];
+  if (!file) return;
+  event.target.value = "";
+
+  if (data.length === 0) {
+    alert("Daten werden noch geladen – bitte kurz warten.");
+    return;
+  }
+
+  const reader = new FileReader();
+  reader.onload = function(e) {
+    try {
+      if (typeof XLSX === "undefined") {
+        const script = document.createElement("script");
+        script.src = "https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js";
+        script.onload = () => processExcel(e.target.result);
+        document.head.appendChild(script);
+      } else {
+        processExcel(e.target.result);
+      }
+    } catch(err) {
+      alert("Fehler: " + err.message);
+    }
+  };
+  reader.readAsArrayBuffer(file);
+}
+
+function processExcel(arrayBuffer) {
+  const workbook  = XLSX.read(arrayBuffer, { type: "array", cellFormula: false });
+  const sheetName = workbook.SheetNames.find(n => n.toLowerCase().includes("aktivit")) || workbook.SheetNames[0];
+  const ws        = workbook.Sheets[sheetName];
+  const auftraege = [];
+  const range     = XLSX.utils.decode_range(ws["!ref"] || "A1");
+
+  for (let r = range.s.r + 1; r <= range.e.r; r++) {
+    const cellD = ws[XLSX.utils.encode_cell({ r, c: 3 })]; // Spalte D = Aktivität
+    const cellF = ws[XLSX.utils.encode_cell({ r, c: 5 })]; // Spalte F = Produzierbare Menge
+    if (!cellD || !cellD.v) continue;
+
+    let bomId = String(cellD.v).trim();
+    if (bomId.endsWith(".0")) bomId = bomId.slice(0, -2);
+    if (!isNaN(bomId) && bomId.includes(".")) bomId = String(Math.round(parseFloat(bomId)));
+    if (!bomId || bomId === "Aktivität" || bomId === "" || bomId === "0") continue;
+
+    const menge = cellF ? (parseFloat(cellF.v) || parseFloat(String(cellF.w || "").replace(",", ".")) || 0) : 0;
+    const bom   = data.find(b => String(b.bom_id) === bomId);
+    auftraege.push({ bomId, menge, bom: bom || null });
+  }
+
+  if (auftraege.length === 0) {
+    alert("Keine gültigen Einträge gefunden.");
+    return;
+  }
+  renderUploadModal(auftraege);
+}
+
+function getVerpackungForBom(bom) {
+  if (!bom || !Array.isArray(bom.components)) return "";
+  const texte = [];
+  bom.components.forEach(c => {
+    const t = verpackungMap[c.artikelnummer];
+    if (t && !texte.includes(t)) texte.push(t);
+  });
+  return texte.join(" | ");
+}
+
+function renderUploadModal(auftraege) {
+  const body    = document.getElementById("uploadModalBody");
+  const bekannt = auftraege.filter(a => a.bom).length;
+  const unbek   = auftraege.filter(a => !a.bom).length;
+
+  body.innerHTML = `
+    <div style="margin-bottom:12px;font-size:14px;color:#6b7280;">
+      ${auftraege.length} Aufträge –
+      <span style="color:#15803d;font-weight:700;">${bekannt} bekannt</span>
+      ${unbek > 0 ? `, <span style="color:#b91c1c;font-weight:700;">${unbek} unbekannt</span>` : ""}
+    </div>
+    <div style="margin-bottom:10px;display:flex;gap:8px;flex-wrap:wrap;">
+      <button class="comp-add-btn" onclick="selectAllUpload(true)">Alle auswählen</button>
+      <button class="comp-add-btn" style="background:#6b7280;" onclick="selectAllUpload(false)">Alle abwählen</button>
+    </div>
+    <div style="overflow-x:auto;">
+    <table class="component-editor-table" style="width:100%;">
+      <thead><tr>
+        <th style="width:32px;"></th>
+        <th>BOM</th><th>Beschreibung</th>
+        <th style="width:90px;">Menge</th>
+        <th>Verpackungsanweisung</th><th>Status</th>
+      </tr></thead>
+      <tbody>
+        ${auftraege.map((a, i) => {
+          const verpack = getVerpackungForBom(a.bom);
+          return `<tr style="${!a.bom ? 'background:#fff7ed;' : ''}">
+            <td><input type="checkbox" class="upload-check" data-idx="${i}"
+              ${a.bom ? "checked" : ""} style="width:18px;height:18px;cursor:pointer;"></td>
+            <td style="font-weight:700;">${a.bomId}</td>
+            <td style="font-size:13px;color:#374151;">${a.bom ? a.bom.beschreibung : "–"}</td>
+            <td><input type="number" class="comp-input upload-menge" data-idx="${i}"
+              value="${a.menge}" min="1" style="width:80px;text-align:center;font-weight:700;"></td>
+            <td style="font-size:13px;color:#92400e;">${verpack || '<span style="color:#d1d5db;">–</span>'}</td>
+            <td>${a.bom
+              ? '<span style="color:#15803d;font-weight:700;">✓</span>'
+              : '<span style="color:#b91c1c;font-weight:700;">⚠</span>'}</td>
+          </tr>`;
+        }).join("")}
+      </tbody>
+    </table></div>`;
+
+  body.querySelectorAll(".upload-menge").forEach(input => {
+    input.addEventListener("change", e => {
+      auftraege[parseInt(e.target.dataset.idx)].menge = parseFloat(e.target.value) || 0;
+    });
+  });
+
+  window._uploadAuftraege = auftraege;
+  document.getElementById("printSelectedBtn").style.display  = "inline-block";
+  document.getElementById("printTabelleBtn").style.display   = "inline-block";
+  document.getElementById("uploadModal").style.display       = "flex";
+}
+
+function selectAllUpload(checked) {
+  document.querySelectorAll(".upload-check").forEach(cb => cb.checked = checked);
+}
+
+function closeUploadModal() {
+  document.getElementById("uploadModal").style.display = "none";
+}
+
+function printSelected(mode) {
+  const checked  = [...document.querySelectorAll(".upload-check:checked")].map(cb => parseInt(cb.dataset.idx));
+  if (checked.length === 0) { alert("Keine Aufträge ausgewählt."); return; }
+  const selected = checked.map(i => window._uploadAuftraege[i]);
+  if (mode === "tabelle") { printAsTabelle(selected); return; }
+
+  const printWindow = window.open("", "_blank");
+  const pages = selected.map(a => {
+    const bom = a.bom;
+    if (!bom) return `<div style="page-break-after:always;padding:20px;"><h2>BOM ${a.bomId} – unbekannt</h2><p>Menge: ${a.menge} Stück</p></div>`;
+
+    let verpackTexte = [];
+    (bom.components || []).forEach(c => {
+      const t = verpackungMap[c.artikelnummer];
+      if (t && !verpackTexte.includes(t)) verpackTexte.push(t);
+    });
+    const compRows = (bom.components || []).map(c =>
+      `<tr><td>${c.artikelnummer}</td><td>${c.beschreibung}</td><td>${Number.isInteger(c.menge) ? c.menge : parseFloat(c.menge).toFixed(2)}</td></tr>`
+    ).join("");
+
+    return `<div style="page-break-after:always;font-family:Arial,sans-serif;padding:15px;font-size:10pt;">
+      <div style="display:flex;justify-content:space-between;">
+        <div style="font-size:18pt;font-weight:bold;">FORMTEILE FRITSCH GMBH</div>
+        <div style="text-align:right;font-size:10pt;">Dokument: PRD-BOM-01<br>Druckdatum: ${new Date().toLocaleString("de-DE")}</div>
+      </div>
+      <div style="font-size:16pt;font-weight:bold;margin-top:8px;">Produktionsauftrag</div>
+      <div><strong>BOM:</strong> ${bom.bom_id} | <strong>${bom.beschreibung}</strong><br>
+      <strong>Produktionsmenge:</strong> ${a.menge} Stück</div>
+      <hr style="margin:12px 0;">
+      ${bom.arbeitsanweisung ? `<div style="margin:10px 0;padding:10px;border-left:4px solid #0284c7;background:#e0f2fe;"><strong>🔧 ARBEITSANWEISUNG</strong><br>${bom.arbeitsanweisung}</div>` : ""}
+      ${verpackTexte.length > 0 ? `<div style="margin:10px 0;padding:10px;border-left:4px solid #ea580c;background:#fff7ed;"><strong>📦 VERPACKUNGSANWEISUNG</strong><br>${verpackTexte.join("<br>")}</div>` : ""}
+      ${bom.neutralisierung ? `<div style="margin:10px 0;padding:10px;border-left:4px solid #b91c1c;background:#fee2e2;"><strong>⚠ NEUTRALISIERUNG ERFORDERLICH</strong><br>${bom.neutralisierung}</div>` : ""}
+      <table style="width:100%;border-collapse:collapse;margin-top:12px;">
+        <thead><tr>
+          <th style="text-align:left;border-bottom:2px solid black;padding:6px;">Artikel</th>
+          <th style="text-align:left;border-bottom:2px solid black;padding:6px;">Beschreibung</th>
+          <th style="text-align:left;border-bottom:2px solid black;padding:6px;">Menge</th>
+        </tr></thead>
+        <tbody>${compRows}</tbody>
+      </table>
+      <div style="margin-top:30px;">
+        <div style="margin-bottom:16px;"><span style="display:inline-block;width:18px;height:18px;border:2px solid black;margin-right:8px;vertical-align:middle;"></span>Neutralisiert</div>
+        <div style="margin-bottom:16px;">Start (hh:mm) <span style="display:inline-block;width:35px;height:24px;border:2px solid black;margin-right:4px;"></span><span style="display:inline-block;width:35px;height:24px;border:2px solid black;"></span></div>
+        <div style="margin-bottom:16px;">Ende (hh:mm) <span style="display:inline-block;width:35px;height:24px;border:2px solid black;margin-right:4px;"></span><span style="display:inline-block;width:35px;height:24px;border:2px solid black;"></span></div>
+        <div style="margin-bottom:16px;">Produziert von: ___________________________</div>
+        <div>QS Freigabe: ___________________________</div>
+      </div>
+    </div>`;
+  }).join("");
+
+  printWindow.document.write(`<html><head><title>Produktionsaufträge</title>
+    <style>@page{margin:10mm;} body{margin:0;} td{border-bottom:1px solid #ccc;padding:6px;}</style>
+    </head><body>${pages}</body></html>`);
+  printWindow.document.close();
+  setTimeout(() => { printWindow.focus(); printWindow.print(); }, 400);
+}
+
+function printAsTabelle(selected) {
+  const printWindow = window.open("", "_blank");
+  const rows = selected.map(a => {
+    const verpack = getVerpackungForBom(a.bom);
+    return `<tr>
+      <td style="font-weight:700;">${a.bomId}</td>
+      <td>${a.bom ? a.bom.beschreibung : '<span style="color:#b91c1c;">⚠ Unbekannt</span>'}</td>
+      <td style="text-align:center;font-weight:700;">${a.menge}</td>
+      <td>${a.bom && a.bom.arbeitsanweisung ? a.bom.arbeitsanweisung : "–"}</td>
+      <td>${verpack || "–"}</td>
+      <td>${a.bom && a.bom.neutralisierung ? "⚠ " + a.bom.neutralisierung : "–"}</td>
+    </tr>`;
+  }).join("");
+
+  printWindow.document.write(`<html><head><title>Produktionsübersicht</title>
+    <style>
+      @page{size:A4 landscape;margin:10mm;}
+      body{font-family:Arial,sans-serif;font-size:9pt;}
+      table{width:100%;border-collapse:collapse;}
+      th{background:#1e3a8a;color:white;padding:6px 8px;text-align:left;}
+      td{padding:5px 8px;border-bottom:1px solid #ddd;vertical-align:top;}
+      tr:nth-child(even){background:#f8f9fa;}
+    </style></head><body>
+    <div style="display:flex;justify-content:space-between;margin-bottom:10px;">
+      <div style="font-size:14pt;font-weight:bold;">FORMTEILE FRITSCH GMBH</div>
+      <div style="font-size:9pt;text-align:right;">Produktionsübersicht<br>Druckdatum: ${new Date().toLocaleString("de-DE")}</div>
+    </div>
+    <table>
+      <thead><tr>
+        <th>BOM</th><th>Beschreibung</th><th>Menge</th>
+        <th>Arbeitsanweisung</th><th>Verpackung</th><th>Neutralisierung</th>
+      </tr></thead>
+      <tbody>${rows}</tbody>
+    </table>
+    </body></html>`);
+  printWindow.document.close();
+  setTimeout(() => { printWindow.focus(); printWindow.print(); }, 400);
+}
+
+// Keep-Alive Ping alle 8 Minuten
+setInterval(() => { fetch(BOM_BACKEND + "/health").catch(() => {}); }, 8 * 60 * 1000);
